@@ -1,11 +1,13 @@
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
+import static javax.measure.unit.SI.KILOGRAM;
+import javax.measure.quantity.Mass;
+import org.jscience.physics.model.RelativisticModel;
+import org.jscience.physics.amount.Amount;
 import spark.ModelAndView;
 import spark.template.freemarker.FreeMarkerEngine;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.Statement;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.sql.*;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -19,23 +21,25 @@ public class Main {
     port(Integer.valueOf(System.getenv("PORT")));
     staticFileLocation("/public");
 
-    get("/hello", (req, res) -> "Hello World");
+    get("/hello", (req, res) -> {
+      RelativisticModel.select();
+      Amount<Mass> m = Amount.valueOf("12 GeV").to(KILOGRAM);
+      return "E=mc^2: 12 GeV = " + m.toString();
+    });
 
     get("/", (request, response) -> {
-        Map<String, Object> attributes = new HashMap<>();
-        attributes.put("message", "Hello World!");
+      Map<String, Object> attributes = new HashMap<>();
+      attributes.put("message", "Hello World!");
 
-        return new ModelAndView(attributes, "index.ftl");
+      return new ModelAndView(attributes, "index.ftl");
     }, new FreeMarkerEngine());
 
-    HikariConfig config = new  HikariConfig();
-    config.setJdbcUrl(System.getenv("JDBC_DATABASE_URL"));
-    final HikariDataSource dataSource = (config.getJdbcUrl() != null) ?
-      new HikariDataSource(config) : new HikariDataSource();
-
     get("/db", (req, res) -> {
+      Connection connection = null;
       Map<String, Object> attributes = new HashMap<>();
-      try(Connection connection = dataSource.getConnection()) {
+      try {
+        connection = getConnection();
+
         Statement stmt = connection.createStatement();
         stmt.executeUpdate("CREATE TABLE IF NOT EXISTS ticks (tick timestamp)");
         stmt.executeUpdate("INSERT INTO ticks VALUES (now())");
@@ -51,9 +55,26 @@ public class Main {
       } catch (Exception e) {
         attributes.put("message", "There was an error: " + e);
         return new ModelAndView(attributes, "error.ftl");
+      } finally {
+        if (connection != null) try{connection.close();} catch(SQLException e){}
       }
     }, new FreeMarkerEngine());
 
   }
+
+  private static Connection getConnection() throws URISyntaxException, SQLException {
+    URI dbUri = new URI(System.getenv("DATABASE_URL"));
+    int port = dbUri.getPort();
+    String dbUrl = "jdbc:postgresql://" + dbUri.getHost() + ":" + port + dbUri.getPath();
+
+    if (dbUri.getUserInfo() != null) {
+      String username = dbUri.getUserInfo().split(":")[0];
+      String password = dbUri.getUserInfo().split(":")[1];
+      return DriverManager.getConnection(dbUrl, username, password);
+    } else {
+      return DriverManager.getConnection(dbUrl);
+    }
+  }
+
 
 }
